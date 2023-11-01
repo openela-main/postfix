@@ -1,0 +1,158 @@
+diff --git a/src/global/mail_params.c b/src/global/mail_params.c
+index 91c70f7..483613c 100644
+--- a/src/global/mail_params.c
++++ b/src/global/mail_params.c
+@@ -379,6 +379,8 @@ int     warn_compat_break_smtputf8_enable;
+ int     warn_compat_break_chroot;
+ int     warn_compat_break_relay_restrictions;
+ 
++bool    var_rhel_ipv6_normalize;
++
+ /* check_myhostname - lookup hostname and validate */
+ 
+ static const char *check_myhostname(void)
+@@ -825,6 +827,7 @@ void    mail_params_init()
+ 	VAR_LONG_QUEUE_IDS, DEF_LONG_QUEUE_IDS, &var_long_queue_ids,
+ 	VAR_STRICT_SMTPUTF8, DEF_STRICT_SMTPUTF8, &var_strict_smtputf8,
+ 	VAR_ENABLE_ORCPT, DEF_ENABLE_ORCPT, &var_enable_orcpt,
++	VAR_RHEL_IPV6_NORMALIZE, DEF_RHEL_IPV6_NORMALIZE, &var_rhel_ipv6_normalize,
+ 	0,
+     };
+     const char *cp;
+diff --git a/src/global/mail_params.h b/src/global/mail_params.h
+index e4358ca..74459d9 100644
+--- a/src/global/mail_params.h
++++ b/src/global/mail_params.h
+@@ -3153,7 +3153,7 @@ extern char *var_local_rwr_clients;
+   * EHLO keyword filter.
+   */
+ #define VAR_SMTPD_EHLO_DIS_WORDS	"smtpd_discard_ehlo_keywords"
+-#define DEF_SMTPD_EHLO_DIS_WORDS	""
++#define DEF_SMTPD_EHLO_DIS_WORDS	"chunking"
+ extern char *var_smtpd_ehlo_dis_words;
+ 
+ #define VAR_SMTPD_EHLO_DIS_MAPS		"smtpd_discard_ehlo_keyword_address_maps"
+@@ -4199,9 +4199,13 @@ extern int var_postlogd_watchdog;
+ #define INFO_LOG_ADDR_FORM_NAME_INTERNAL	"internal"
+ 
+ #define VAR_INFO_LOG_ADDR_FORM	"info_log_address_format"
+-#define DEF_INFO_LOG_ADDR_FORM	INFO_LOG_ADDR_FORM_NAME_EXTERNAL
++#define DEF_INFO_LOG_ADDR_FORM	INFO_LOG_ADDR_FORM_NAME_INTERNAL
+ extern char *var_info_log_addr_form;
+ 
++#define VAR_RHEL_IPV6_NORMALIZE	"rhel_ipv6_normalize"
++#define DEF_RHEL_IPV6_NORMALIZE	0
++extern bool var_rhel_ipv6_normalize;
++
+ /* LICENSE
+ /* .ad
+ /* .fi
+diff --git a/src/smtpd/smtpd.c b/src/smtpd/smtpd.c
+index da7227f..53e640e 100644
+--- a/src/smtpd/smtpd.c
++++ b/src/smtpd/smtpd.c
+@@ -4334,6 +4334,7 @@ static int xclient_cmd(SMTPD_STATE *state, int argc, SMTPD_TOKEN *argv)
+     SMTPD_TOKEN *argp;
+     char   *raw_value;
+     char   *attr_value;
++    const char *bare_value;
+     char   *attr_name;
+     int     update_namaddr = 0;
+     int     name_status;
+@@ -4481,15 +4482,31 @@ static int xclient_cmd(SMTPD_STATE *state, int argc, SMTPD_TOKEN *argv)
+ 		UPDATE_STR(state->addr, attr_value);
+ 		UPDATE_STR(state->rfc_addr, attr_value);
+ 	    } else {
+-		neuter(attr_value, NEUTER_CHARACTERS, '?');
+-		if (normalize_mailhost_addr(attr_value, &state->rfc_addr,
++		if (var_rhel_ipv6_normalize) {
++			neuter(attr_value, NEUTER_CHARACTERS, '?');
++		}
++		if ((var_rhel_ipv6_normalize &&
++		    normalize_mailhost_addr(attr_value, &state->rfc_addr,
+ 					    &state->addr,
+-					    &state->addr_family) < 0) {
++					    &state->addr_family) < 0) ||
++		    (!var_rhel_ipv6_normalize &&
++			(bare_value = valid_mailhost_addr(attr_value, DONT_GRIPE)) == 0)) {
+ 		    state->error_mask |= MAIL_ERROR_PROTOCOL;
+ 		    smtpd_chat_reply(state, "501 5.5.4 Bad %s syntax: %s",
+ 				     XCLIENT_ADDR, attr_value);
+ 		    return (-1);
+ 		}
++		if (!var_rhel_ipv6_normalize) {
++		    UPDATE_STR(state->addr, bare_value);
++		    UPDATE_STR(state->rfc_addr, attr_value);
++#ifdef HAS_IPV6
++		    if (strncasecmp(attr_value, INET_PROTO_NAME_IPV6 ":",
++			    sizeof(INET_PROTO_NAME_IPV6 ":") - 1) == 0)
++			state->addr_family = AF_INET6;
++		    else
++#endif
++			state->addr_family = AF_INET;
++                }
+ 	    }
+ 	    update_namaddr = 1;
+ 	}
+@@ -4569,17 +4586,25 @@ static int xclient_cmd(SMTPD_STATE *state, int argc, SMTPD_TOKEN *argv)
+ 		attr_value = SERVER_ADDR_UNKNOWN;
+ 		UPDATE_STR(state->dest_addr, attr_value);
+ 	    } else {
++		if (var_rhel_ipv6_normalize) {
+ #define NO_NORM_RFC_ADDR		((char **) 0)
+ #define NO_NORM_ADDR_FAMILY	((int *) 0)
+-		neuter(attr_value, NEUTER_CHARACTERS, '?');
+-		if (normalize_mailhost_addr(attr_value, NO_NORM_RFC_ADDR,
++			neuter(attr_value, NEUTER_CHARACTERS, '?');
++		}
++		if ((var_rhel_ipv6_normalize &&
++		    normalize_mailhost_addr(attr_value, NO_NORM_RFC_ADDR,
+ 					    &state->dest_addr,
+-					    NO_NORM_ADDR_FAMILY) < 0) {
++					    NO_NORM_ADDR_FAMILY) < 0) ||
++		    (!var_rhel_ipv6_normalize &&
++			(bare_value = valid_mailhost_addr(attr_value, DONT_GRIPE)) == 0)) {
+ 		    state->error_mask |= MAIL_ERROR_PROTOCOL;
+ 		    smtpd_chat_reply(state, "501 5.5.4 Bad %s syntax: %s",
+ 				     XCLIENT_DESTADDR, attr_value);
+ 		    return (-1);
+ 		}
++		if (!var_rhel_ipv6_normalize) {
++			UPDATE_STR(state->dest_addr, bare_value);
++		}
+ 	    }
+ 	    /* XXX Require same address family as client address. */
+ 	}
+@@ -4690,6 +4715,7 @@ static int xforward_cmd(SMTPD_STATE *state, int argc, SMTPD_TOKEN *argv)
+     SMTPD_TOKEN *argp;
+     char   *raw_value;
+     char   *attr_value;
++    const char *bare_value;
+     char   *attr_name;
+     int     updated = 0;
+     static const NAME_CODE xforward_flags[] = {
+@@ -4808,15 +4834,22 @@ static int xforward_cmd(SMTPD_STATE *state, int argc, SMTPD_TOKEN *argv)
+ 		UPDATE_STR(state->xforward.addr, attr_value);
+ 	    } else {
+ 		neuter(attr_value, NEUTER_CHARACTERS, '?');
+-		if (normalize_mailhost_addr(attr_value,
++		if ((var_rhel_ipv6_normalize &&
++		    normalize_mailhost_addr(attr_value,
+ 					    &state->xforward.rfc_addr,
+ 					    &state->xforward.addr,
+-					    NO_NORM_ADDR_FAMILY) < 0) {
++					    NO_NORM_ADDR_FAMILY) < 0) ||
++		    (!var_rhel_ipv6_normalize &&
++			(bare_value = valid_mailhost_addr(attr_value, DONT_GRIPE)) == 0)) {
+ 		    state->error_mask |= MAIL_ERROR_PROTOCOL;
+ 		    smtpd_chat_reply(state, "501 5.5.4 Bad %s syntax: %s",
+ 				     XFORWARD_ADDR, attr_value);
+ 		    return (-1);
+ 		}
++		if (!var_rhel_ipv6_normalize) {
++		    UPDATE_STR(state->xforward.addr, bare_value);
++		    UPDATE_STR(state->xforward.rfc_addr, attr_value);
++		}
+ 	    }
+ 	    break;
+ 
