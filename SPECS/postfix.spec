@@ -21,12 +21,9 @@
 # Postfix requires one exlusive uid/gid and a 2nd exclusive gid for its own
 # use.  Let me know if the second gid collides with another package.
 # Be careful: Redhat's 'mail' user & group isn't unique!
-%define postfix_uid	89
+# It's now handled by systemd-sysusers.
 %define postfix_user	postfix
-%define postfix_gid	89
-%define postfix_group	postfix
 %define maildrop_group	postdrop
-%define maildrop_gid	90
 
 %define postfix_config_dir	%{_sysconfdir}/postfix
 %define postfix_daemon_dir	%{_libexecdir}/postfix
@@ -49,15 +46,13 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.5.9
-Release: 19%{?dist}
+Release: 24%{?dist}
 Epoch: 2
 URL: http://www.postfix.org
 License: (IBM and GPLv2+) or (EPL-2.0 and GPLv2+)
 Requires(post): systemd systemd-sysv hostname
 Requires(post): %{_sbindir}/alternatives
 Requires(post): %{_bindir}/openssl
-Requires(pre): %{_sbindir}/groupadd
-Requires(pre): %{_sbindir}/useradd
 Requires(preun): %{_sbindir}/alternatives
 Requires(preun): systemd
 Requires(postun): systemd
@@ -74,6 +69,7 @@ Source2: postfix.service
 Source3: README-Postfix-SASL-RedHat.txt
 Source4: postfix.aliasesdb
 Source5: postfix-chroot-update
+Source6: postfix.sysusers
 
 # Sources 50-99 are upstream [patch] contributions
 
@@ -106,6 +102,10 @@ Patch13: postfix-3.5.9-whitespace-name-fix.patch
 Patch14: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
 # rhbz#1938847, backported from upstream
 Patch15: postfix-3.5.9-coverity-fix.patch
+# rhbz#2134789, backported feature from upstream
+Patch16: postfix-3.5.9-SRV-resolve.patch
+# rhbz#2193363 ZUUL CI uses kernel 6 and we have to add this to postfix
+Patch17: postfix-3.5.9-makedefs.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -116,6 +116,7 @@ BuildRequires: make
 BuildRequires: libdb-devel, perl-generators, pkgconfig, zlib-devel
 BuildRequires: systemd-units, libicu-devel
 BuildRequires: gcc, m4, findutils
+BuildRequires: systemd-rpm-macros
 %if 0%{?rhel} < 9
 BuildRequires: libnsl2-devel
 %endif
@@ -260,6 +261,8 @@ popd
 %patch13 -p1 -b .whitespace-name-fix
 %patch14 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
 %patch15 -p1 -b .coverity-fix
+%patch16 -p1 -b .SRV-resolution
+%patch17 -p1 -b .makedefs
 
 for f in README_FILES/TLS_{LEGACY_,}README TLS_ACKNOWLEDGEMENTS; do
 	iconv -f iso8859-1 -t utf8 -o ${f}{_,} &&
@@ -382,6 +385,9 @@ mkdir -p %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE2} %{buildroot}%{_unitdir}
 install -m 755 %{SOURCE4} %{buildroot}%{postfix_daemon_dir}/aliasesdb
 install -m 755 %{SOURCE5} %{buildroot}%{postfix_daemon_dir}/chroot-update
+
+# systemd-sysusers
+install -p -D -m 0644 %{SOURCE6} %{buildroot}%{_sysusersdir}/postfix.conf
 
 install -c auxiliary/rmail/rmail $RPM_BUILD_ROOT%{_bindir}/rmail.postfix
 
@@ -538,10 +544,7 @@ exit 0
 
 %pre
 # Add user and groups if necessary
-%{_sbindir}/groupadd -g %{maildrop_gid} -r %{maildrop_group} 2>/dev/null
-%{_sbindir}/groupadd -g %{postfix_gid} -r %{postfix_group} 2>/dev/null
-%{_sbindir}/groupadd -g 12 -r mail 2>/dev/null
-%{_sbindir}/useradd -d %{postfix_queue_dir} -s /sbin/nologin -g %{postfix_group} -G mail -M -r -u %{postfix_uid} %{postfix_user} 2>/dev/null
+%sysusers_create_compat %{SOURCE6}
 
 # hack, to turn man8/smtpd.8.gz into alternatives symlink (part of the rhbz#1051180 fix)
 # this could be probably dropped in f23+
@@ -725,6 +728,9 @@ fi
 
 %ghost %attr(0644, root, root) %{_var}/lib/misc/postfix.aliasesdb-stamp
 
+# systemd-sysusers
+%{_sysusersdir}/postfix.conf
+
 %if 0%{?fedora} < 23 && 0%{?rhel} < 9
 %files sysvinit
 %{_initrddir}/postfix
@@ -803,6 +809,28 @@ fi
 %endif
 
 %changelog
+* Mon Aug 14 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-24
+- Fixed possible warning when postfix is restarted
+  Resolves: rhbz#2075571
+
+* Mon Aug 14 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-23
+- Spec cleanup
+  Related: rhbz#2095454
+
+* Wed Jul 05 2023 Jonathan Wright <jonathan@almalinux.org> - 2:3.5.9-22
+- Use systemd-sysusers
+  Resolves: rhbz#2095454
+
+* Wed May 17 2023 Tomas Korbar <tkorbar@redhat.com> - 2:3.5.9-21
+- Fix patch for SRV record resolution feature
+  Related: rhbz#2134789
+
+* Thu May 04 2023 Tomas Korbar <tkorbar@redhat.com> - 2:3.5.9-20
+- Backport dns SRV record resolution feature (RFC6186)
+  Resolves: rhbz#2134789
+- Fix building in ZUUL CI
+  Resolves: rhbz#2193363
+
 * Fri Aug 19 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.9-19
 - Suppressed openssl output during SSL certificates generation
   Resolves: rhbz#2041589
