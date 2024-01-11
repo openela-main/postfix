@@ -49,7 +49,7 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.5.8
-Release: 4%{?dist}
+Release: 7%{?dist}
 Epoch: 2
 Group: System Environment/Daemons
 URL: http://www.postfix.org
@@ -103,6 +103,10 @@ Patch12: postfix-3.5.8-back-compat-3.3.1.patch
 Patch13: postfix-3.5.8-whitespace-name-fix.patch
 # rhbz#1931403, sent upstream
 Patch14: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
+# rhbz#1787010, patch backported from upstream
+Patch15: postfix-3.5.8-SRV-resolve.patch
+# rhbz#2196577, ZUUL CI uses kernel 6 and we have to add this to postfix
+Patch16: postfix-3.5.8-makedefs.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -244,6 +248,8 @@ popd
 # rhbz#1977732, sent upstream
 %patch13 -p1 -b .whitespace-name-fix
 %patch14 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
+%patch15 -p1 -b .SRV-resolve
+%patch16 -p1 -b .makedefs
 
 for f in README_FILES/TLS_{LEGACY_,}README TLS_ACKNOWLEDGEMENTS; do
 	iconv -f iso8859-1 -t utf8 -o ${f}{_,} &&
@@ -757,6 +763,20 @@ exit 0
 %endif
 
 %changelog
+* Mon Aug 14 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.8-7
+- Fixed possible warning when postfix is restarted
+  Resolves: rhbz#2162659
+
+* Wed May 17 2023 Tomas Korbar <tkorbar@redhat.com> - 2:3.5.8-6
+- Fix patch for SRV record resolution feature
+  Related: rhbz#1787010
+
+* Thu May 04 2023 Tomas Korbar <tkorbar@redhat.com> - 2:3.5.8-5
+- Backport dns SRV record resolution feature (RFC6186)
+  Resolves: rhbz#1787010
+- Fix building in ZUUL CI
+  Resolves: rhbz#2196577
+
 * Thu Feb 17 2022 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.8-4
 - Added SELinux workound for systemd service to work after 'postfix start'
   Resolves: rhbz#2028015
