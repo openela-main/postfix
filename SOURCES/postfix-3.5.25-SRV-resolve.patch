@@ -1,14 +1,8 @@
-commit 3a64b35100aa150ce80957dc56f0db7fbdb07017
-Author: Tomas Korbar <tkorbar@redhat.com>
-Date:   Wed May 17 10:01:21 2023 +0200
-
-    Backport SRV record resolution feature
-
 diff --git a/mantools/postlink b/mantools/postlink
-index 490d028..a093c0a 100755
+index 41fa110..ef005e0 100755
 --- a/mantools/postlink
 +++ b/mantools/postlink
-@@ -1129,6 +1129,10 @@ while (<>) {
+@@ -1136,6 +1136,10 @@ while (<>) {
      s;\bpostlog_service_name\b;<a href="postconf.5.html#postlog_service_name">$&</a>;g;
      s;\bpostlogd_watchdog_timeout\b;<a href="postconf.5.html#postlogd_watchdog_timeout">$&</a>;g;
  
@@ -20,13 +14,13 @@ index 490d028..a093c0a 100755
  
      s;\bpolicy_time_limit\b;<a href="postconf.5.html#transport_time_limit">$&</a>;g;
 diff --git a/proto/postconf.proto b/proto/postconf.proto
-index 89f9e9b..ca8899f 100644
+index 844d248..2c04326 100644
 --- a/proto/postconf.proto
 +++ b/proto/postconf.proto
-@@ -17760,3 +17760,111 @@ value to disable the feature. </p>
+@@ -18039,3 +18039,111 @@ to enable. This feature is enabled by default with Postfix &ge;
  
- <p> This feature was backported from Postfix 3.6 to Postfix versions
- 3.5.9, 3.4.19, 3.3.16. 3.2.21. </p>
+ <p> This feature is available in Postfix &ge; 3.9, 3.8.1, 3.7.6,
+ 3.6.10, and 3.5.20. </p>
 +
 +%PARAM use_srv_lookup
 +
@@ -136,10 +130,10 @@ index 89f9e9b..ca8899f 100644
 +<p> This feature was backported from Postfix 3.8. </p>
 +
 diff --git a/src/dns/dns.h b/src/dns/dns.h
-index 3631d23..2af1ee2 100644
+index 27d2ab9..be2cb67 100644
 --- a/src/dns/dns.h
 +++ b/src/dns/dns.h
-@@ -147,10 +147,12 @@ typedef struct DNS_RR {
+@@ -147,12 +147,14 @@ typedef struct DNS_RR {
      unsigned short class;		/* C_IN, etc. */
      unsigned int ttl;			/* always */
      unsigned int dnssec_valid;		/* DNSSEC validated */
@@ -147,14 +141,16 @@ index 3631d23..2af1ee2 100644
 +    unsigned short pref;		/* T_MX and T_SRV record related */
 +    unsigned short weight;		/* T_SRV related, defined in rfc2782 */
 +    unsigned short port;		/* T_SRV related, defined in rfc2782 */
+     /* Assume that flags lives in what was previously padding */
+     unsigned short flags;		/* DNS_RR_FLAG_XX, see below */
      struct DNS_RR *next;		/* linkage */
      size_t  data_len;			/* actual data size */
 -    char    data[1];			/* actually a bunch of data */
 +    char    *data;			/* a bunch of data */
  } DNS_RR;
  
-  /*
-@@ -172,14 +174,29 @@ extern char *dns_strrecord(VSTRING *, DNS_RR *);
+ #define DNS_RR_FLAG_TRUNCATED	(1<<0)
+@@ -178,14 +180,29 @@ extern char *dns_strrecord(VSTRING *, DNS_RR *);
   /*
    * dns_rr.c
    */
@@ -184,7 +180,7 @@ index 3631d23..2af1ee2 100644
  extern int dns_rr_compare_pref_ipv6(DNS_RR *, DNS_RR *);
  extern int dns_rr_compare_pref_ipv4(DNS_RR *, DNS_RR *);
  extern int dns_rr_compare_pref_any(DNS_RR *, DNS_RR *);
-@@ -283,8 +300,9 @@ extern int dns_lookup_rv(const char *, unsigned, DNS_RR **, VSTRING *,
+@@ -290,8 +307,9 @@ extern int dns_lookup_rv(const char *, unsigned, DNS_RR **, VSTRING *,
    * Below is the precedence order. The order between DNS_RETRY and DNS_NOTFOUND
    * is arbitrary.
    */
@@ -197,7 +193,7 @@ index 3631d23..2af1ee2 100644
  #define DNS_FAIL	(-4)		/* query failed, don't retry */
  #define DNS_INVAL	(-3)		/* query ok, malformed reply */
 diff --git a/src/dns/dns_lookup.c b/src/dns/dns_lookup.c
-index 4e3e647..93694d9 100644
+index 30bfc9e..f62ca54 100644
 --- a/src/dns/dns_lookup.c
 +++ b/src/dns/dns_lookup.c
 @@ -691,6 +691,8 @@ static int dns_get_rr(DNS_RR **list, const char *orig_name, DNS_REPLY *reply,
@@ -237,16 +233,16 @@ index 4e3e647..93694d9 100644
      return (DNS_OK);
  }
  
-@@ -911,7 +925,7 @@ static int dns_get_answer(const char *orig_name, DNS_REPLY *reply, int type,
- 		    resource_found++;
- 		    rr->dnssec_valid = *maybe_secure ? reply->dnssec_ad : 0;
+@@ -913,7 +927,7 @@ static int dns_get_answer(const char *orig_name, DNS_REPLY *reply, int type,
  		    *rrlist = dns_rr_append(*rrlist, rr);
+ 		    if (DNS_RR_IS_TRUNCATED(*rrlist))
+ 			break;
 -		} else if (status == DNS_NULLMX) {
 +		} else if (status == DNS_NULLMX || status == DNS_NULLSRV) {
  		    CORRUPT(status);		/* TODO: use better name */
  		} else if (not_found_status != DNS_RETRY)
  		    not_found_status = status;
-@@ -1045,6 +1059,12 @@ int     dns_lookup_x(const char *name, unsigned type, unsigned flags,
+@@ -1047,6 +1061,12 @@ int     dns_lookup_x(const char *name, unsigned type, unsigned flags,
  				name);
  	    SET_H_ERRNO(NO_DATA);
  	    return (status);
@@ -260,7 +256,7 @@ index 4e3e647..93694d9 100644
  	    if (rrlist && dns_rr_filter_maps) {
  		if (dns_rr_filter_execute(rrlist) < 0) {
 diff --git a/src/dns/dns_rr.c b/src/dns/dns_rr.c
-index b550788..15b5dee 100644
+index cf82f9f..c99fd4d 100644
 --- a/src/dns/dns_rr.c
 +++ b/src/dns/dns_rr.c
 @@ -7,13 +7,15 @@
@@ -280,10 +276,10 @@ index b550788..15b5dee 100644
  /*	const char *data;
  /*	size_t data_len;
  /*
-@@ -49,6 +51,30 @@
- /*	DNS_RR	*dns_rr_remove(list, record)
- /*	DNS_RR	*list;
+@@ -51,6 +53,30 @@
  /*	DNS_RR	*record;
+ /*
+ /*	int	var_dns_rr_list_limit;
 +/*
 +/*	DNS_RR	*dns_srv_rr_sort(list)
 +/*	DNS_RR	*list;
@@ -311,7 +307,7 @@ index b550788..15b5dee 100644
  /* DESCRIPTION
  /*	The routines in this module maintain memory for DNS resource record
  /*	information, and maintain lists of DNS resource records.
-@@ -56,10 +82,14 @@
+@@ -58,10 +84,14 @@
  /*	dns_rr_create() creates and initializes one resource record.
  /*	The \fIqname\fR field specifies the query name.
  /*	The \fIrname\fR field specifies the reply name.
@@ -327,7 +323,7 @@ index b550788..15b5dee 100644
  /*	dns_rr_free() releases the resource used by of zero or more
  /*	resource records.
  /*
-@@ -81,6 +111,9 @@
+@@ -91,6 +121,9 @@
  /*	dns_rr_remove() removes the specified record from the specified list.
  /*	The updated list is the result value.
  /*	The record MUST be a list member.
@@ -337,7 +333,7 @@ index b550788..15b5dee 100644
  /* LICENSE
  /* .ad
  /* .fi
-@@ -113,11 +146,15 @@
+@@ -133,11 +166,15 @@ int     var_dns_rr_list_limit = 100;
  DNS_RR *dns_rr_create(const char *qname, const char *rname,
  		              ushort type, ushort class,
  		              unsigned int ttl, unsigned pref,
@@ -354,7 +350,7 @@ index b550788..15b5dee 100644
      rr->qname = mystrdup(qname);
      rr->rname = mystrdup(rname);
      rr->type = type;
-@@ -125,8 +162,14 @@ DNS_RR *dns_rr_create(const char *qname, const char *rname,
+@@ -145,8 +182,14 @@ DNS_RR *dns_rr_create(const char *qname, const char *rname,
      rr->ttl = ttl;
      rr->dnssec_valid = 0;
      rr->pref = pref;
@@ -369,8 +365,8 @@ index b550788..15b5dee 100644
 +    }
      rr->data_len = data_len;
      rr->next = 0;
-     return (rr);
-@@ -141,6 +184,8 @@ void    dns_rr_free(DNS_RR *rr)
+     rr->flags = 0;
+@@ -162,6 +205,8 @@ void    dns_rr_free(DNS_RR *rr)
  	    dns_rr_free(rr->next);
  	myfree(rr->qname);
  	myfree(rr->rname);
@@ -379,7 +375,7 @@ index b550788..15b5dee 100644
  	myfree((void *) rr);
      }
  }
-@@ -149,16 +194,17 @@ void    dns_rr_free(DNS_RR *rr)
+@@ -170,16 +215,17 @@ void    dns_rr_free(DNS_RR *rr)
  
  DNS_RR *dns_rr_copy(DNS_RR *src)
  {
@@ -401,7 +397,7 @@ index b550788..15b5dee 100644
      dst->next = 0;
      return (dst);
  }
-@@ -247,6 +293,12 @@ DNS_RR *dns_rr_sort(DNS_RR *list, int (*compar) (DNS_RR *, DNS_RR *))
+@@ -312,6 +358,12 @@ DNS_RR *dns_rr_sort(DNS_RR *list, int (*compar) (DNS_RR *, DNS_RR *))
      int     len;
      int     i;
  
@@ -414,7 +410,7 @@ index b550788..15b5dee 100644
      /*
       * Save state and initialize.
       */
-@@ -293,6 +345,12 @@ DNS_RR *dns_rr_shuffle(DNS_RR *list)
+@@ -358,6 +410,12 @@ DNS_RR *dns_rr_shuffle(DNS_RR *list)
      int     i;
      int     r;
  
@@ -427,7 +423,7 @@ index b550788..15b5dee 100644
      /*
       * Build linear array with pointers to each list element.
       */
-@@ -345,3 +403,141 @@ DNS_RR *dns_rr_remove(DNS_RR *list, DNS_RR *record)
+@@ -410,3 +468,141 @@ DNS_RR *dns_rr_remove(DNS_RR *list, DNS_RR *record)
      }
      return (list);
  }
@@ -633,10 +629,10 @@ index 70e59ac..7eebe3c 100644
  
  /* dns_strtype - translate DNS query type to string */
 diff --git a/src/global/mail_params.h b/src/global/mail_params.h
-index 27b17d5..e8d9c28 100644
+index f61227c..963db5d 100644
 --- a/src/global/mail_params.h
 +++ b/src/global/mail_params.h
-@@ -4209,6 +4209,21 @@ extern char *var_info_log_addr_form;
+@@ -4267,6 +4267,21 @@ extern char *var_info_log_addr_form;
  #define DEF_DNSSEC_PROBE	"ns:."
  extern char *var_dnssec_probe;
  
@@ -659,7 +655,7 @@ index 27b17d5..e8d9c28 100644
  /* .ad
  /* .fi
 diff --git a/src/posttls-finger/posttls-finger.c b/src/posttls-finger/posttls-finger.c
-index a3a9946..60bf047 100644
+index ce5d2c0..3cd11ec 100644
 --- a/src/posttls-finger/posttls-finger.c
 +++ b/src/posttls-finger/posttls-finger.c
 @@ -236,6 +236,8 @@
@@ -709,7 +705,7 @@ index a3a9946..60bf047 100644
  	    addr_list = dns_rr_append(addr_list, addr);
  	    return (addr_list);
  	default:
-@@ -1277,15 +1284,15 @@ static DNS_RR *mx_addr_list(STATE *state, DNS_RR *mx_names)
+@@ -1279,17 +1286,17 @@ static DNS_RR *mx_addr_list(STATE *state, DNS_RR *mx_names)
  #endif
  
      for (rr = mx_names; rr; rr = rr->next) {
@@ -719,6 +715,8 @@ index a3a9946..60bf047 100644
  	addr_list = addr_one(state, addr_list, (char *) rr->data, res_opt,
 -			     rr->pref);
 +			     rr->pref, rr->port);
+ 	if (addr_list && DNS_RR_IS_TRUNCATED(addr_list))
+ 	    break;
      }
      return (addr_list);
  }
@@ -728,7 +726,7 @@ index a3a9946..60bf047 100644
  
  static DNS_RR *domain_addr(STATE *state, char *domain)
  {
-@@ -1350,6 +1357,74 @@ static DNS_RR *domain_addr(STATE *state, char *domain)
+@@ -1354,6 +1361,74 @@ static DNS_RR *domain_addr(STATE *state, char *domain)
      return (addr_list);
  }
  
@@ -803,7 +801,7 @@ index a3a9946..60bf047 100644
  /* host_addr - direct host lookup */
  
  static DNS_RR *host_addr(STATE *state, const char *host)
-@@ -1376,7 +1451,8 @@ static DNS_RR *host_addr(STATE *state, const char *host)
+@@ -1380,7 +1455,8 @@ static DNS_RR *host_addr(STATE *state, const char *host)
  	ahost = host;
  
  #define PREF0	0
@@ -813,7 +811,7 @@ index a3a9946..60bf047 100644
      if (addr_list && addr_list->next) {
  	addr_list = dns_rr_shuffle(addr_list);
  	if (inet_proto_info()->ai_family_list[1] != 0)
-@@ -1465,7 +1541,8 @@ static int dane_host_level(STATE *state, DNS_RR *addr)
+@@ -1469,7 +1545,8 @@ static int dane_host_level(STATE *state, DNS_RR *addr)
  /* parse_destination - parse host/port destination */
  
  static char *parse_destination(char *destination, char *def_service,
@@ -823,7 +821,7 @@ index a3a9946..60bf047 100644
  {
      char   *buf = mystrdup(destination);
      char   *service;
-@@ -1481,12 +1558,13 @@ static char *parse_destination(char *destination, char *def_service,
+@@ -1485,12 +1562,13 @@ static char *parse_destination(char *destination, char *def_service,
       * Parse the host/port information. We're working with a copy of the
       * destination argument so the parsing can be destructive.
       */
@@ -838,7 +836,7 @@ index a3a9946..60bf047 100644
      if (alldig(service)) {
  	if ((port = atoi(service)) >= 65536 || port == 0)
  	    msg_fatal("bad network port in destination: %s", destination);
-@@ -1507,17 +1585,21 @@ static char *parse_destination(char *destination, char *def_service,
+@@ -1511,17 +1589,21 @@ static char *parse_destination(char *destination, char *def_service,
  static void connect_remote(STATE *state, char *dest)
  {
      DNS_RR *addr;
@@ -863,7 +861,7 @@ index a3a9946..60bf047 100644
  	else
  	    state->addr = domain_addr(state, domain);
  	myfree(buf);
-@@ -1531,10 +1613,14 @@ static void connect_remote(STATE *state, char *dest)
+@@ -1535,10 +1617,14 @@ static void connect_remote(STATE *state, char *dest)
      for (addr = state->addr; addr; addr = addr->next) {
  	int     level = dane_host_level(state, addr);
  
@@ -880,7 +878,7 @@ index a3a9946..60bf047 100644
  	    continue;
  	}
  	/* We have a connection */
-@@ -1819,6 +1905,7 @@ static void parse_options(STATE *state, int argc, char *argv[])
+@@ -1823,6 +1909,7 @@ static void parse_options(STATE *state, int argc, char *argv[])
  
      state->smtp = 1;
      state->pass = 1;
@@ -888,7 +886,7 @@ index a3a9946..60bf047 100644
      state->reconnect = -1;
      state->max_reconnect = 5;
      state->wrapper_mode = 0;
-@@ -1829,7 +1916,7 @@ static void parse_options(STATE *state, int argc, char *argv[])
+@@ -1833,7 +1920,7 @@ static void parse_options(STATE *state, int argc, char *argv[])
      memset((void *) &state->options, 0, sizeof(state->options));
      state->options.host_lookup = mystrdup("dns");
  
@@ -897,7 +895,7 @@ index a3a9946..60bf047 100644
  #ifdef USE_TLS
  #define TLSOPTS "A:Cd:fF:g:H:k:K:l:L:m:M:p:P:r:s:wX"
  
-@@ -1868,6 +1955,9 @@ static void parse_options(STATE *state, int argc, char *argv[])
+@@ -1872,6 +1959,9 @@ static void parse_options(STATE *state, int argc, char *argv[])
  	case 'o':
  	    override(optarg);
  	    break;
@@ -928,7 +926,7 @@ index 973cb5d..ff074cd 100644
  	0,
      };
 diff --git a/src/smtp/smtp.c b/src/smtp/smtp.c
-index e46ebd6..2cc9e2f 100644
+index 9a28cc2..29b17fc 100644
 --- a/src/smtp/smtp.c
 +++ b/src/smtp/smtp.c
 @@ -146,6 +146,7 @@
@@ -957,7 +955,7 @@ index e46ebd6..2cc9e2f 100644
  /* MIME PROCESSING CONTROLS
  /* .ad
  /* .fi
-@@ -1052,6 +1064,9 @@ bool    var_smtp_dummy_mail_auth;
+@@ -1059,6 +1071,9 @@ bool    var_smtp_dummy_mail_auth;
  char   *var_smtp_dsn_filter;
  char   *var_smtp_dns_re_filter;
  bool    var_smtp_balance_inet_proto;
@@ -967,7 +965,7 @@ index e46ebd6..2cc9e2f 100644
  
   /* Special handling of 535 AUTH errors. */
  char   *var_smtp_sasl_auth_cache_name;
-@@ -1074,6 +1089,7 @@ MAPS   *smtp_pix_bug_maps;
+@@ -1081,6 +1096,7 @@ MAPS   *smtp_pix_bug_maps;
  HBC_CHECKS *smtp_header_checks;		/* limited header checks */
  HBC_CHECKS *smtp_body_checks;		/* limited body checks */
  SMTP_CLI_ATTR smtp_cli_attr;		/* parsed command-line */
@@ -975,7 +973,7 @@ index e46ebd6..2cc9e2f 100644
  
  #ifdef USE_TLS
  
-@@ -1357,6 +1373,14 @@ static void post_init(char *unused_name, char **argv)
+@@ -1364,6 +1380,14 @@ static void post_init(char *unused_name, char **argv)
       * the process lifetime.
       */
      get_cli_attr(&smtp_cli_attr, argv);
@@ -991,7 +989,7 @@ index e46ebd6..2cc9e2f 100644
  
  /* pre_init - pre-jail initialization */
 diff --git a/src/smtp/smtp.h b/src/smtp/smtp.h
-index 281cfe4..3f4c209 100644
+index 4fea37a..ab91b7e 100644
 --- a/src/smtp/smtp.h
 +++ b/src/smtp/smtp.h
 @@ -84,6 +84,14 @@ typedef struct SMTP_ITERATOR {
@@ -1027,7 +1025,7 @@ index 281cfe4..3f4c209 100644
  
  extern TLS_APPL_STATE *smtp_tls_ctx;	/* client-side TLS engine */
 diff --git a/src/smtp/smtp_addr.c b/src/smtp/smtp_addr.c
-index 2210ff7..7f20838 100644
+index 7509edc..d39f970 100644
 --- a/src/smtp/smtp_addr.c
 +++ b/src/smtp/smtp_addr.c
 @@ -17,6 +17,15 @@
@@ -1107,7 +1105,7 @@ index 2210ff7..7f20838 100644
  	    addr_list = dns_rr_append(addr_list, addr);
  	    return (addr_list);
  	default:
-@@ -283,10 +309,10 @@ static DNS_RR *smtp_addr_list(DNS_RR *mx_names, DSN_BUF *why)
+@@ -285,10 +311,10 @@ static DNS_RR *smtp_addr_list(DNS_RR *mx_names, DSN_BUF *why)
       * tweaking the in-process resolver flags.
       */
      for (rr = mx_names; rr; rr = rr->next) {
@@ -1117,10 +1115,10 @@ index 2210ff7..7f20838 100644
  	addr_list = smtp_addr_one(addr_list, (char *) rr->data, res_opt,
 -				  rr->pref, why);
 +				  rr->pref, rr->port, why);
+ 	if (addr_list && DNS_RR_IS_TRUNCATED(addr_list))
+ 	    break;
      }
-     return (addr_list);
- }
-@@ -669,7 +695,7 @@ DNS_RR *smtp_host_addr(const char *host, int misc_flags, DSN_BUF *why)
+@@ -680,7 +706,7 @@ DNS_RR *smtp_host_addr(const char *host, int misc_flags, DSN_BUF *why)
       * address to internal form. Otherwise, the host is specified by name.
       */
  #define PREF0	0
@@ -1129,7 +1127,7 @@ index 2210ff7..7f20838 100644
      if (addr_list
  	&& (misc_flags & SMTP_MISC_FLAG_LOOP_DETECT)
  	&& smtp_find_self(addr_list) != 0) {
-@@ -691,3 +717,135 @@ DNS_RR *smtp_host_addr(const char *host, int misc_flags, DSN_BUF *why)
+@@ -702,3 +728,135 @@ DNS_RR *smtp_host_addr(const char *host, int misc_flags, DSN_BUF *why)
  	smtp_print_addr(host, addr_list);
      return (addr_list);
  }
@@ -1527,10 +1525,10 @@ index 1b3a20e..3ac4ccc 100644
  	    msg_warn("smtp_session_passivate: bad cached dest properties");
  	    SMTP_SESSION_ACTIVATE_ERR_RETURN();
 diff --git a/src/smtpd/smtpd_check.c b/src/smtpd/smtpd_check.c
-index 85d5944..a60e878 100644
+index 69119ad..2af9e98 100644
 --- a/src/smtpd/smtpd_check.c
 +++ b/src/smtpd/smtpd_check.c
-@@ -3056,8 +3056,8 @@ static int check_server_access(SMTPD_STATE *state, const char *table,
+@@ -3067,8 +3067,8 @@ static int check_server_access(SMTPD_STATE *state, const char *table,
  	|| type == T_AAAA
  #endif
  	) {
@@ -1541,7 +1539,7 @@ index 85d5944..a60e878 100644
      } else {
  	dns_status = dns_lookup(domain, type, 0, &server_list,
  				(VSTRING *) 0, (VSTRING *) 0);
-@@ -3065,8 +3065,8 @@ static int check_server_access(SMTPD_STATE *state, const char *table,
+@@ -3076,8 +3076,8 @@ static int check_server_access(SMTPD_STATE *state, const char *table,
  	    return (SMTPD_CHECK_DUNNO);
  	if (dns_status == DNS_NOTFOUND /* Not: h_errno == NO_DATA */ ) {
  	    if (type == T_MX) {
