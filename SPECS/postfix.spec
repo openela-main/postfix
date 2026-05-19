@@ -46,7 +46,7 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.5.25
-Release: 1%{?dist}
+Release: 2%{?dist}
 Epoch: 2
 URL: http://www.postfix.org
 License: (IBM and GPLv2+) or (EPL-2.0 and GPLv2+)
@@ -102,6 +102,7 @@ Patch13: postfix-3.5.9-whitespace-name-fix.patch
 Patch14: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
 # rhbz#2134789, backported feature from upstream
 Patch15: postfix-3.5.25-SRV-resolve.patch
+Patch16: postfix-3.5.25-rhel-remove-version-mismatch-warning.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -257,6 +258,7 @@ popd
 %patch13 -p1 -b .whitespace-name-fix
 %patch14 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
 %patch15 -p1 -b .SRV-resolution
+%patch16 -p1 -b .warning
 
 for f in README_FILES/TLS_{LEGACY_,}README TLS_ACKNOWLEDGEMENTS; do
 	iconv -f iso8859-1 -t utf8 -o ${f}{_,} &&
@@ -803,6 +805,10 @@ fi
 %endif
 
 %changelog
+* Tue Jan 06 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.5.25-2
+- Added a RHEL-specific patch to remove an OpenSSL version mismatch warning.
+  RHEL-128018
+
 * Thu Jul 18 2024 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.25-1
 - New version
   Resolves: RHEL-20023
