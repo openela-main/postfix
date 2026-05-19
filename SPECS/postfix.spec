@@ -57,7 +57,7 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.8.5
-Release: 8%{?dist}
+Release: 9%{?dist}
 Epoch: 2
 URL: http://www.postfix.org
 License: (IPL-1.0 OR EPL-2.0) AND GPL-2.0-or-later AND BSD-4-Clause-UC
@@ -108,6 +108,7 @@ Patch11: postfix-3.4.4-chroot-example-fix.patch
 # rhbz#1931403, sent upstream
 Patch13: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
 Patch14: postfix-3.8.5-openssl-no-engine.patch
+Patch15: postfix-3.8.5-rhel-remove-version-mismatch-warning.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -272,6 +273,7 @@ popd
 %patch11 -p1 -b .chroot-example-fix
 %patch13 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
 %patch14 -p1 -b .openssl-no-engine
+%patch15 -p1 -b .warning
 
 # Backport 3.8-20221006 fix for uname -r detection
 sed -i makedefs -e '\@Linux\.@s|345|3456|'
@@ -840,6 +842,10 @@ fi
 %endif
 
 %changelog
+* Tue Jan 06 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.8.5-9
+- Added a RHEL-specific patch to remove an OpenSSL version mismatch warning.
+  Resolves: RHEL-138726
+
 * Tue Oct 29 2024 Troy Dawson <tdawson@redhat.com> - 2:3.8.5-8
 - Bump release for October 2024 mass rebuild:
   Resolves: RHEL-64018
