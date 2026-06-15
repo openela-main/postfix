@@ -49,7 +49,7 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.5.8
-Release: 7%{?dist}
+Release: 8%{?dist}
 Epoch: 2
 Group: System Environment/Daemons
 URL: http://www.postfix.org
@@ -107,6 +107,9 @@ Patch14: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
 Patch15: postfix-3.5.8-SRV-resolve.patch
 # rhbz#2196577, ZUUL CI uses kernel 6 and we have to add this to postfix
 Patch16: postfix-3.5.8-makedefs.patch
+# https://redhat.atlassian.net/browse/RHEL-176548
+# https://www.mail-archive.com/postfix-announce@postfix.org/msg00110.html
+Patch17: postfix-3.8.16-CVE-2026-43964.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -250,6 +253,7 @@ popd
 %patch14 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
 %patch15 -p1 -b .SRV-resolve
 %patch16 -p1 -b .makedefs
+%patch17 -p1 -b .cve-2026-43964
 
 for f in README_FILES/TLS_{LEGACY_,}README TLS_ACKNOWLEDGEMENTS; do
 	iconv -f iso8859-1 -t utf8 -o ${f}{_,} &&
@@ -763,6 +767,10 @@ exit 0
 %endif
 
 %changelog
+* Thu May 21 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.5.8-8
+- Fix for CVE-2026-43964: buffer over-read via malformed enhanced status code.
+  Resolves: RHEL-176548
+
 * Mon Aug 14 2023 Jaroslav Škarvada <jskarvad@redhat.com> - 2:3.5.8-7
 - Fixed possible warning when postfix is restarted
   Resolves: rhbz#2162659
