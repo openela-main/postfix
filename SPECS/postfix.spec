@@ -57,7 +57,7 @@
 Name: postfix
 Summary: Postfix Mail Transport Agent
 Version: 3.8.5
-Release: 9%{?dist}
+Release: 10%{?dist}
 Epoch: 2
 URL: http://www.postfix.org
 License: (IPL-1.0 OR EPL-2.0) AND GPL-2.0-or-later AND BSD-4-Clause-UC
@@ -109,6 +109,9 @@ Patch11: postfix-3.4.4-chroot-example-fix.patch
 Patch13: pflogsumm-1.1.5-syslog-name-underscore-fix.patch
 Patch14: postfix-3.8.5-openssl-no-engine.patch
 Patch15: postfix-3.8.5-rhel-remove-version-mismatch-warning.patch
+# https://redhat.atlassian.net/browse/RHEL-176554
+# https://www.mail-archive.com/postfix-announce@postfix.org/msg00110.html
+Patch16: postfix-3.8.16-CVE-2026-43964.patch
 
 # Optional patches - set the appropriate environment variables to include
 #                    them when building the package/spec file
@@ -274,6 +277,7 @@ popd
 %patch13 -p1 -b .pflogsumm-1.1.5-syslog-name-underscore-fix
 %patch14 -p1 -b .openssl-no-engine
 %patch15 -p1 -b .warning
+%patch16 -p1 -b .cve-2026-43964
 
 # Backport 3.8-20221006 fix for uname -r detection
 sed -i makedefs -e '\@Linux\.@s|345|3456|'
@@ -842,6 +846,10 @@ fi
 %endif
 
 %changelog
+* Thu May 21 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.8.5-10
+- Fix for CVE-2026-43964: buffer over-read via malformed enhanced status code.
+  Resolves: RHEL-176554
+
 * Tue Jan 06 2026 Fedor Vorobev <fvorobev@redhat.com> - 2:3.8.5-9
 - Added a RHEL-specific patch to remove an OpenSSL version mismatch warning.
   Resolves: RHEL-138726
